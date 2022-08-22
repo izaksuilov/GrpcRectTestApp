@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+option csharp_namespace = "GrpcService";
+
+import "google/protobuf/empty.proto";
+package greet;
+
+
+service Greeter 
+{
+	rpc Start(google.protobuf.Empty) returns (State) {}
+	rpc Stop(google.protobuf.Empty) returns (State) {}
+	rpc GetArrayRect(google.protobuf.Empty) returns (stream Rectangle) {}
+	rpc GetFieldSize(google.protobuf.Empty) returns (Size) {}
+}
+
+message Rectangle
+{
+	double X = 1;
+	double Y = 2;
+	double Width = 3;
+	double Height = 4;
+}
+
+//Size целенаправленно не €вл€етс€ полем Rectangle исход€ из
+//логических соображений по поводу обращени€ к пол€м Rectangle.
+//Ќапример, Rectangle rect = new Rectangle();
+//“огда, на мой взгл€д, rect.Width и rect.X выгл€д€т логичнее, чем rect.Size.Width и rect.X
+message Size
+{ 
+	double Width = 1;
+	double Height = 2;
+}
+
+message State
+{
+	bool OperationSucess = 1;
+}

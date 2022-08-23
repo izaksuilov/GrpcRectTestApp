@@ -25,7 +25,7 @@ namespace GrpcService.Services
         public override Task<State> Start(Empty request, ServerCallContext context)
         {
             bool result = false;
-            if (_cancelTokenSource == null)
+            if (_cancelTokenSource == null)//если значение не null, значит, уже запущено
             {
                 try
                 {
@@ -71,6 +71,7 @@ namespace GrpcService.Services
             _threads = new List<Thread>();
             _arrayReady = new ManualResetEvent(false);
             _rectangles = null;
+
             //запускаем потоки
             int threads = new Random().Next(MIN_THREADS, MAX_THREADS);
             int totalRects = 0;
@@ -82,6 +83,7 @@ namespace GrpcService.Services
                 t.Start(new Tuple<int, int>(totalRects, currentThreadRects));
                 totalRects += currentThreadRects;
             }
+            //создаем массив с заполнеными изначальными значениями 
             _rectangles = Enumerable.Repeat(new ServerRect(new Rectangle(), 0, 0, false), totalRects).ToArray();
             _arrayReady.Set();
         }
@@ -100,6 +102,9 @@ namespace GrpcService.Services
             int startIxd = tuple.Item1;
             int currentThreadRects = tuple.Item2;
             int endIdx = startIxd + currentThreadRects;
+
+            //ожидаем заполнения всего массива,
+            //тк каждый поток работает со своим диапозоном в массиве
 
             _arrayReady.WaitOne();
 
@@ -121,11 +126,15 @@ namespace GrpcService.Services
                     true);
             }
 
+            //обновялем прямоугольники
             while (!_token.IsCancellationRequested)
             {
                 for (int i = startIxd; i < endIdx; i++)
                 {
-                    if (_rectangles![i].IsCalculated)
+                    //Здесь не используется ResetEvent, тк может возникуть ситуация, 
+                    //когда _rectangles[i] еще не отправлен, а _rectangles[i + 1] уже отправлен.
+                    //В таком случае нам не нужно ждать текущий прямоугольник, а можно перейти к следующему
+                    if (_rectangles![i].IsCalculated) 
                     {
                         Thread.Sleep(1);
                         continue;
@@ -185,6 +194,8 @@ namespace GrpcService.Services
                 if (_token.IsCancellationRequested)
                     break;
 
+                //для непосчитанного прямоугольника можно было бы отправлять null, чтобы сэкономить время
+                //но null недопустим в данной ситуации, тк будет вылетать ошибка
                 if (!_rectangles[i].IsCalculated)
                     await responseStream.WriteAsync(EmptyRect).ConfigureAwait(false);
                 else

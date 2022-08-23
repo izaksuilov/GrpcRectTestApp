@@ -24,7 +24,6 @@ namespace GrpcClient
             InitializeComponent();
             Client = new Client();
             Client.Connect();
-            
         }
 
         private async void Start_Click(object sender, RoutedEventArgs e)
@@ -55,6 +54,8 @@ namespace GrpcClient
                 Canvas.SetTop(rect, rectangle.Y);
                 RectsCanvas.Children.Add(rect);
             }
+
+            //обновляем прямоугольники
             while (!_token.IsCancellationRequested)
             {
                 rects = Client.GetArrayRectAsync(_token);
@@ -64,7 +65,12 @@ namespace GrpcClient
                     i++;
                     if (rectangle.Width == 0)
                         continue;
+
                     var rect = RectsCanvas.Children[i] as System.Windows.Shapes.Rectangle;
+
+                    //тк при отправке мы не можем отправить null, поэтому мы отправляли пустой прямоугольник
+                    //таким образом мы "восстанавливаем" все прямоугольники,
+                    //которые были получены, но еще не посчитаны на тот момент
                     if (rect != null && rect.Width == 0)
                     {
                         rect.Width = rectangle.Width;

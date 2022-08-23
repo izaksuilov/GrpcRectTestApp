@@ -30,6 +30,12 @@ namespace GrpcClient
         {
             if (_client == null)
                 yield break;
+
+            //Если использовать переданный token, то при вызове Cancel
+            //в методе MoveNext просто вылетает ошибка.
+            //Можно было бы обернуть в try catch, но компилятор не позволяет.
+            //Поэтому данный _token является просто заглушкой
+
             CancellationToken _token = new CancellationToken();
             using (var call = _client.GetArrayRect(new Empty()))
             {

@@ -7,21 +7,22 @@ namespace GrpcService.Services
 {
     public class GreeterService : Greeter.GreeterBase
     {
-        private const int MIN_THREADS = 5,      MAX_THREADS = 10,
-                          MIN_RECTS = 20,       MAX_RECTS = 100,
-                          MIN_RECT_WIDTH = 10,  MAX_RECT_WIDTH = 40,
+        private const int MIN_THREADS = 5, MAX_THREADS = 10,
+                          MIN_RECTS = 20, MAX_RECTS = 100,
+                          MIN_RECT_WIDTH = 10, MAX_RECT_WIDTH = 40,
                           MIN_RECT_HEIGHT = 10, MAX_RECT_HEIGHT = 40,
-                          FIELD_HEIGHT = 576,   FIELD_WIDTH = 1024;
+                          FIELD_HEIGHT = 576, FIELD_WIDTH = 1024;
 
         private const double MIN_DELTA_X = 0.4, MAX_DELTA_X = 1.8,
                              MIN_DELTA_Y = 0.4, MAX_DELTA_Y = 1.8;
 
-        private volatile static ServerRect[]? _rectangles;
+        private static ServerRect[]? _rectangles;
         private volatile static Rectangle EmptyRect = new();
         private static CancellationTokenSource? _cancelTokenSource;
         private static CancellationToken _token;
         private static ManualResetEvent _arrayReady;
         private static List<Thread> _threads;
+        private static ReadWriteLock _locker;
         public override Task<State> Start(Empty request, ServerCallContext context)
         {
             bool result = false;
@@ -66,6 +67,7 @@ namespace GrpcService.Services
         }
         private static void Init()
         {
+            _locker = new ReadWriteLock();
             _cancelTokenSource = new CancellationTokenSource();
             _token = _cancelTokenSource.Token;
             _threads = new List<Thread>();
@@ -104,12 +106,16 @@ namespace GrpcService.Services
             int endIdx = startIxd + currentThreadRects;
 
             //ожидаем заполнения всего массива,
-            //тк каждый поток работает со своим диапозоном в массиве
+            //тк каждый поток работает со своим диапазоном в массиве
 
             _arrayReady.WaitOne();
+            if (_rectangles == null)
+                return;
+
+            ServerRect[] rectangles = new ServerRect[endIdx - startIxd];
 
             //создаем прямоугольники
-            for (int i = startIxd; i < endIdx; i++)
+            for (int i = 0; i < rectangles.Length; i++)
             {
                 Rectangle rect = new Rectangle()
                 {
@@ -119,31 +125,41 @@ namespace GrpcService.Services
                 rect.X = random.Next(0, (int)(FIELD_WIDTH - rect.Width));
                 rect.Y = random.Next(0, (int)(FIELD_HEIGHT - rect.Height));
 
-                _rectangles![i] = new ServerRect(
+                rectangles[i] = new ServerRect(
                     rect,
                     random.NextDouble() * (random.NextDouble() > 0.5 ? 1 : -1),
                     random.NextDouble() * (random.NextDouble() > 0.5 ? 1 : -1),
                     true);
             }
 
+            using (_locker.WriteLock())//перезаписываем только измененный диапазон
+            {
+                for (int i = startIxd, j = 0; i < endIdx; i++, j++)
+                    _rectangles[i] = rectangles[j];
+            }
+
             //обновялем прямоугольники
             while (!_token.IsCancellationRequested)
             {
-                for (int i = startIxd; i < endIdx; i++)
+                using (_locker.ReadLock())
+                {
+                    rectangles = _rectangles[startIxd..endIdx];
+                }
+                for (int i = 0; i < endIdx - startIxd; i++)
                 {
                     //Здесь не используется ResetEvent, тк может возникуть ситуация, 
-                    //когда _rectangles[i] еще не отправлен, а _rectangles[i + 1] уже отправлен.
+                    //когда rectangles[i] еще не отправлен, а rectangles[i + 1] уже отправлен.
                     //В таком случае нам не нужно ждать текущий прямоугольник, а можно перейти к следующему
-                    if (_rectangles![i].IsCalculated) 
+                    if (rectangles[i].IsCalculated)
                     {
                         Thread.Sleep(1);
                         continue;
                     }
 
-                    double deltaX = _rectangles[i].DeltaX, deltaY = _rectangles[i].DeltaY;
+                    double deltaX = rectangles[i].DeltaX, deltaY = rectangles[i].DeltaY;
 
-                    double offsetX = _rectangles[i].Rect.X + deltaX;
-                    double offsetY = _rectangles[i].Rect.Y + deltaY;
+                    double offsetX = rectangles[i].Rect.X + deltaX;
+                    double offsetY = rectangles[i].Rect.Y + deltaY;
 
                     double CheckAndCorrectPosition(double delta, double min, double max)
                     {
@@ -159,17 +175,22 @@ namespace GrpcService.Services
                         return delta * deltaSign;
                     }
 
-                    if (offsetX < 0 || offsetX + _rectangles[i].Rect.Width >= FIELD_WIDTH)
-                        _rectangles[i].DeltaX = CheckAndCorrectPosition(deltaX, MIN_DELTA_X, MAX_DELTA_X);
+                    if (offsetX < 0 || offsetX + rectangles[i].Rect.Width >= FIELD_WIDTH)
+                        rectangles[i].DeltaX = CheckAndCorrectPosition(deltaX, MIN_DELTA_X, MAX_DELTA_X);
 
-                    if (offsetY < 0 || offsetY + _rectangles[i].Rect.Height >= FIELD_HEIGHT)
-                        _rectangles[i].DeltaY = CheckAndCorrectPosition(deltaY, MIN_DELTA_Y, MAX_DELTA_Y);
-                    
+                    if (offsetY < 0 || offsetY + rectangles[i].Rect.Height >= FIELD_HEIGHT)
+                        rectangles[i].DeltaY = CheckAndCorrectPosition(deltaY, MIN_DELTA_Y, MAX_DELTA_Y);
 
-                    _rectangles[i].Rect.X += _rectangles[i].DeltaX;
-                    _rectangles[i].Rect.Y += _rectangles[i].DeltaY;
 
-                    _rectangles[i].IsCalculated = true;
+                    rectangles[i].Rect.X += rectangles[i].DeltaX;
+                    rectangles[i].Rect.Y += rectangles[i].DeltaY;
+
+                    rectangles[i].IsCalculated = true;
+                }
+                using (_locker.WriteLock())//перезаписываем только измененный диапазон
+                {
+                    for (int i = startIxd, j = 0; i < endIdx; i++, j++)
+                        _rectangles[i] = rectangles[j];
                 }
             }
         }
@@ -186,26 +207,35 @@ namespace GrpcService.Services
             IServerStreamWriter<Rectangle> responseStream,
             ServerCallContext context)
         {
-            if (_rectangles == null)
-                return;
+            ServerRect[] rectangles;
 
-            for (int i = 0; i < _rectangles.Length; i++)
+            using (_locker.ReadLock())
+            {
+                if (_rectangles == null)
+                    return;
+                rectangles = (ServerRect[])_rectangles.Clone();
+            }
+            foreach (var serverRect in rectangles)
             {
                 if (_token.IsCancellationRequested)
                     break;
-
                 //для непосчитанного прямоугольника можно было бы отправлять null, чтобы сэкономить время
                 //но null недопустим в данной ситуации, тк будет вылетать ошибка
-                if (!_rectangles[i].IsCalculated)
+                if (!serverRect.IsCalculated)
                     await responseStream.WriteAsync(EmptyRect).ConfigureAwait(false);
                 else
+                    await responseStream.WriteAsync(serverRect.Rect).ConfigureAwait(false);
+            }
+            using (_locker.WriteLock())
+            {
+                for (int i = 0; i < rectangles.Length; i++)//помечаем только отправленные объекты 
                 {
-                    await responseStream.WriteAsync(_rectangles[i].Rect).ConfigureAwait(false);
-                    _rectangles[i].IsCalculated = false;
+                    if (rectangles[i].IsCalculated)
+                        _rectangles[i].IsCalculated = false;
                 }
             }
         }
-        
+
 
         class ServerRect
         {
@@ -223,5 +253,4 @@ namespace GrpcService.Services
             }
         }
     }
-    
 }

@@ -6,14 +6,36 @@
         xmlns:local="clr-namespace:GrpcClient"
         mc:Ignorable="d"
         Title="MainWindow" Height="1080" Width="1920" WindowState="Maximized">
+    <Window.DataContext>
+        <local:ClientViewModel/>
+    </Window.DataContext>
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        
-        <Border x:Name="CanvasBorder" BorderThickness="5">
-            <Canvas x:Name="RectsCanvas"/>
+
+        <Border BorderThickness="{Binding BorderThickness}" BorderBrush="{Binding BorderColor}"
+                Width="{Binding BorderWidth}" Height="{Binding BorderHeight}">
+            <ItemsControl ItemsSource="{Binding Rectangles}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <Canvas/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                        <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                        <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                    </Style>
+                </ItemsControl.ItemContainerStyle>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Rectangle Width="{Binding Width}" Height="{Binding Height}"
+                                   Stroke="{Binding Color}"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </Border>
 
         <Grid Grid.Row="1" Width="200">
